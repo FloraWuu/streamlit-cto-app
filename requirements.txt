@@ -1,3 +1,7 @@
-altair
-pandas
 streamlit
+langchain
+langchain-community
+langchain-openai
+langchain-core
+python-dotenv
+faiss-cpu

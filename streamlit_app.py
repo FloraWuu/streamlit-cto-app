@@ -1,40 +1,70 @@
-import altair as alt
-import numpy as np
-import pandas as pd
 import streamlit as st
+import os
+from dotenv import load_dotenv
 
-"""
-# Welcome to Streamlit!
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain_openai import AzureChatOpenAI
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:.
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
+@st.cache_resource
+def load_data(vector_store_dir: str="data"):
+    db = FAISS.load_local(vector_store_dir, AzureOpenAIEmbeddings())
+    llm = AzureChatOpenAI(model_name="gpt-35-turbo", temperature=0.5)
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+    print("Loading data...")
+     
+    AMAZON_REVIEW_BOT = RetrievalQA.from_chain_type(llm,
+                  retriever=db.as_retriever(search_type="similarity_score_threshold",
+                    search_kwargs={"score_threshold": 0.7}))
+    AMAZON_REVIEW_BOT.return_source_documents = True
 
-num_points = st.slider("Number of points in spiral", 1, 10000, 1100)
-num_turns = st.slider("Number of turns in spiral", 1, 300, 31)
+    return AMAZON_REVIEW_BOT
 
-indices = np.linspace(0, 1, num_points)
-theta = 2 * np.pi * num_turns * indices
-radius = indices
+def chat(message, history):
+    print(f"[message]{message}")
+    print(f"[history]{history}")
+    enable_chat = True
 
-x = radius * np.cos(theta)
-y = radius * np.sin(theta)
+    AMAZON_REVIEW_BOT = load_data()
 
-df = pd.DataFrame({
-    "x": x,
-    "y": y,
-    "idx": indices,
-    "rand": np.random.randn(num_points),
-})
+    ans = AMAZON_REVIEW_BOT.invoke({"query": message})
+    if ans["source_documents"] or enable_chat:
+        return ans["result"]
+    else:
+        return "I don't know."
 
-st.altair_chart(alt.Chart(df, height=700, width=700)
-    .mark_point(filled=True)
-    .encode(
-        x=alt.X("x", axis=None),
-        y=alt.Y("y", axis=None),
-        color=alt.Color("idx", legend=None, scale=alt.Scale()),
-        size=alt.Size("rand", legend=None, scale=alt.Scale(range=[1, 150])),
-    ))
+if __name__ == "__main__":
+    os.environ["OPENAI_API_TYPE"] = "azure"
+    os.environ["OPENAI_API_VERSION"] = "2023-05-15"
+    os.environ["OPENAI_API_BASE"] = "https://pvg-azure-openai-uk-south.openai.azure.com/openai"
+    env_path = os.getenv("HOME") + "/Documents/src/openai/.env"
+    load_dotenv(dotenv_path=env_path, verbose=True) 
+
+    st.title('IRM Document')
+
+    prompt = st.chat_input("Enter your questions here")
+
+    if "user_prompt_history" not in st.session_state:
+       st.session_state["user_prompt_history"]=[]
+    if "chat_answers_history" not in st.session_state:
+       st.session_state["chat_answers_history"]=[]
+    if "chat_history" not in st.session_state:
+       st.session_state["chat_history"]=[]
+
+    if prompt:
+       with st.spinner("Generating......"):
+           output = chat(prompt, st.session_state["chat_history"])
+
+           st.session_state["chat_answers_history"].append(output)
+           st.session_state["user_prompt_history"].append(prompt)
+           st.session_state["chat_history"].append((prompt,output))
+
+    # Displaying the chat history
+
+    if st.session_state["chat_answers_history"]:
+       for i, j in zip(st.session_state["chat_answers_history"],st.session_state["user_prompt_history"]):
+          message1 = st.chat_message("user")
+          message1.write(j)
+          message2 = st.chat_message("assistant")
+          message2.write(i)
